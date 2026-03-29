@@ -1,16 +1,27 @@
 "use client"
 
-import { deleteTransactionFileAction, uploadTransactionFilesAction } from "@/app/(app)/transactions/actions"
+import {
+  deleteTransactionFileAction,
+  generateStampedPdfAction,
+  uploadTransactionFilesAction,
+} from "@/app/(app)/transactions/actions"
 import { FilePreview } from "@/components/files/preview"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import config from "@/lib/config"
 import { File, Transaction } from "@/prisma/client"
-import { Loader2, Upload, X } from "lucide-react"
+import { FileCheck, Loader2, Stamp, Upload, X } from "lucide-react"
 import { useState } from "react"
+
+function isStampedFile(file: File): boolean {
+  const meta = file.metadata as Record<string, unknown> | null
+  return !!(meta && meta.isStamped)
+}
 
 export default function TransactionFiles({ transaction, files }: { transaction: Transaction; files: File[] }) {
   const [isUploading, setIsUploading] = useState(false)
+  const [isStamping, setIsStamping] = useState(false)
 
   const handleDeleteFile = async (fileId: string) => {
     await deleteTransactionFileAction(transaction.id, fileId)
@@ -29,6 +40,14 @@ export default function TransactionFiles({ transaction, files }: { transaction: 
     }
   }
 
+  const handleGenerateStampedPdf = async () => {
+    setIsStamping(true)
+    await generateStampedPdfAction(transaction.id)
+    setIsStamping(false)
+  }
+
+  const hasStampedFile = files.some(isStampedFile)
+
   return (
     <>
       {files.map((file) => (
@@ -42,9 +61,31 @@ export default function TransactionFiles({ transaction, files }: { transaction: 
           >
             <X className="h-4 w-4" />
           </Button>
+          {isStampedFile(file) && (
+            <Badge variant="secondary" className="absolute left-2 top-2 z-10 gap-1">
+              <FileCheck className="h-3 w-3" />
+              Stamped PDF
+            </Badge>
+          )}
           <FilePreview file={file} />
         </Card>
       ))}
+
+      {files.length > 0 && (
+        <Button
+          variant="outline"
+          className="w-full gap-2"
+          onClick={handleGenerateStampedPdf}
+          disabled={isStamping}
+        >
+          {isStamping ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Stamp className="h-4 w-4" />
+          )}
+          {hasStampedFile ? "Re-generate Stamped PDF" : "Generate Stamped PDF"}
+        </Button>
+      )}
 
       <Card className="relative min-h-32 p-4">
         <input type="hidden" name="transactionId" value={transaction.id} />

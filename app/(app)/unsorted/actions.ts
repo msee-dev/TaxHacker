@@ -14,7 +14,10 @@ import {
   safePathJoin,
   unsortedFilePath,
 } from "@/lib/files"
+import { createStampedPdf, StampItem } from "@/lib/pdf-stamp"
 import { DEFAULT_PROMPT_ANALYSE_NEW_FILE } from "@/models/defaults"
+import { getCategoryByCode } from "@/models/categories"
+import { getProjectByCode } from "@/models/projects"
 import { createFile, deleteFile, getFileById, updateFile } from "@/models/files"
 import { createTransaction, TransactionData, updateTransactionFiles } from "@/models/transactions"
 import { updateUser } from "@/models/users"
@@ -99,12 +102,11 @@ export async function saveFileAsTransactionAction(
     // Create transaction
     const transaction = await createTransaction(user.id, validatedForm.data)
 
-    // Move file to processed location
+    // Move original file to processed location
     const userUploadsDirectory = getUserUploadsDirectory(user)
     const originalFileName = path.basename(file.path)
     const newRelativeFilePath = getTransactionFileUploadPath(file.id, originalFileName, transaction)
 
-    // Move file to new location and name
     const oldFullFilePath = safePathJoin(userUploadsDirectory, file.path)
     const newFullFilePath = safePathJoin(userUploadsDirectory, newRelativeFilePath)
     await mkdir(path.dirname(newFullFilePath), { recursive: true })
@@ -116,7 +118,74 @@ export async function saveFileAsTransactionAction(
       isReviewed: true,
     })
 
-    await updateTransactionFiles(transaction.id, user.id, [file.id])
+    const fileIds = [file.id]
+
+    // Generate stamped PDF
+    try {
+      const category = transaction.categoryCode
+        ? await getCategoryByCode(user.id, transaction.categoryCode)
+        : null
+      const project = transaction.projectCode
+        ? await getProjectByCode(user.id, transaction.projectCode)
+        : null
+
+      // Build items with category colors
+      const rawItems = (transaction.items as any[]) || []
+      const stampItems: StampItem[] = await Promise.all(
+        rawItems.map(async (item: any) => {
+          let itemCategory = null
+          if (item.categoryCode) {
+            const cat = await getCategoryByCode(user.id, item.categoryCode)
+            if (cat) itemCategory = { name: cat.name, color: cat.color }
+          }
+          return {
+            name: item.name || item.description || "Item",
+            total: item.total != null ? Math.round(parseFloat(item.total) * 100) : undefined,
+            currencyCode: item.currencyCode || transaction.currencyCode || undefined,
+            category: itemCategory,
+          }
+        })
+      )
+
+      const stampedPdfBytes = await createStampedPdf(newFullFilePath, file.mimetype, {
+        transactionName: transaction.name,
+        merchant: transaction.merchant,
+        issuedAt: transaction.issuedAt,
+        total: transaction.total,
+        currencyCode: transaction.currencyCode,
+        category: category ? { name: category.name, color: category.color } : null,
+        project: project ? { name: project.name, color: project.color } : null,
+        items: stampItems,
+      })
+
+      // Save stamped PDF as a new file
+      const stampedFileUuid = randomUUID()
+      const stampedFileName = `stamped-${path.basename(file.filename, path.extname(file.filename))}.pdf`
+      const stampedRelativePath = getTransactionFileUploadPath(stampedFileUuid, stampedFileName, transaction)
+      const stampedFullPath = safePathJoin(userUploadsDirectory, stampedRelativePath)
+      await mkdir(path.dirname(stampedFullPath), { recursive: true })
+      await writeFile(stampedFullPath, stampedPdfBytes)
+
+      const stampedFileRecord = await createFile(user.id, {
+        id: stampedFileUuid,
+        filename: stampedFileName,
+        path: stampedRelativePath,
+        mimetype: "application/pdf",
+        isReviewed: true,
+        metadata: {
+          size: stampedPdfBytes.length,
+          lastModified: Date.now(),
+          isStamped: true,
+        },
+      })
+
+      fileIds.push(stampedFileRecord.id)
+    } catch (error) {
+      // Stamped PDF generation is best-effort — don't fail the whole save
+      console.error("Failed to generate stamped PDF:", error)
+    }
+
+    await updateTransactionFiles(transaction.id, user.id, fileIds)
 
     revalidatePath("/unsorted")
     revalidatePath("/transactions")

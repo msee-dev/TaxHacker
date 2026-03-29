@@ -4,14 +4,18 @@ import { transactionFormSchema } from "@/forms/transactions"
 import { ActionState } from "@/lib/actions"
 import { getCurrentUser, isSubscriptionExpired } from "@/lib/auth"
 import {
+  fullPathForFile,
   getDirectorySize,
   getTransactionFileUploadPath,
   getUserUploadsDirectory,
   isEnoughStorageToUploadFile,
   safePathJoin,
 } from "@/lib/files"
+import { createStampedPdf, StampItem } from "@/lib/pdf-stamp"
+import { getCategoryByCode } from "@/models/categories"
 import { updateField } from "@/models/fields"
-import { createFile, deleteFile } from "@/models/files"
+import { createFile, deleteFile, getFileById } from "@/models/files"
+import { getProjectByCode } from "@/models/projects"
 import {
   bulkDeleteTransactions,
   createTransaction,
@@ -211,6 +215,118 @@ export async function bulkDeleteTransactionsAction(transactionIds: string[]) {
   } catch (error) {
     console.error("Failed to delete transactions:", error)
     return { success: false, error: "Failed to delete transactions" }
+  }
+}
+
+export async function generateStampedPdfAction(transactionId: string): Promise<ActionState<Transaction>> {
+  try {
+    const user = await getCurrentUser()
+    const transaction = await getTransactionById(transactionId, user.id)
+    if (!transaction) {
+      return { success: false, error: "Transaction not found" }
+    }
+
+    const transactionFileIds = (transaction.files as string[]) || []
+
+    // Find the first non-stamped file to use as source
+    let sourceFile = null
+    for (const fid of transactionFileIds) {
+      const f = await getFileById(fid, user.id)
+      if (!f) continue
+      const meta = f.metadata as Record<string, unknown> | null
+      if (!meta?.isStamped) {
+        sourceFile = f
+        break
+      }
+    }
+
+    if (!sourceFile) {
+      return { success: false, error: "No source file found to stamp" }
+    }
+
+    // Remove any existing stamped files
+    const keptFileIds: string[] = []
+    for (const fid of transactionFileIds) {
+      const f = await getFileById(fid, user.id)
+      if (!f) continue
+      const meta = f.metadata as Record<string, unknown> | null
+      if (meta?.isStamped) {
+        await deleteFile(fid, user.id)
+      } else {
+        keptFileIds.push(fid)
+      }
+    }
+
+    // Build stamp data
+    const category = transaction.categoryCode
+      ? await getCategoryByCode(user.id, transaction.categoryCode)
+      : null
+    const project = transaction.projectCode
+      ? await getProjectByCode(user.id, transaction.projectCode)
+      : null
+
+    const rawItems = (transaction.items as any[]) || []
+    const stampItems: StampItem[] = await Promise.all(
+      rawItems.map(async (item: any) => {
+        let itemCategory = null
+        if (item.categoryCode) {
+          const cat = await getCategoryByCode(user.id, item.categoryCode)
+          if (cat) itemCategory = { name: cat.name, color: cat.color }
+        }
+        return {
+          name: item.name || item.description || "Item",
+          total: item.total != null ? Math.round(parseFloat(item.total) * 100) : undefined,
+          currencyCode: item.currencyCode || transaction.currencyCode || undefined,
+          category: itemCategory,
+        }
+      })
+    )
+
+    const sourceFullPath = fullPathForFile(user, sourceFile)
+    const stampedPdfBytes = await createStampedPdf(sourceFullPath, sourceFile.mimetype, {
+      transactionName: transaction.name,
+      merchant: transaction.merchant,
+      issuedAt: transaction.issuedAt,
+      total: transaction.total,
+      currencyCode: transaction.currencyCode,
+      category: category ? { name: category.name, color: category.color } : null,
+      project: project ? { name: project.name, color: project.color } : null,
+      items: stampItems,
+    })
+
+    // Save stamped PDF
+    const userUploadsDirectory = getUserUploadsDirectory(user)
+    const stampedFileUuid = randomUUID()
+    const stampedFileName = `stamped-${path.basename(sourceFile.filename, path.extname(sourceFile.filename))}.pdf`
+    const stampedRelativePath = getTransactionFileUploadPath(stampedFileUuid, stampedFileName, transaction)
+    const stampedFullPath = safePathJoin(userUploadsDirectory, stampedRelativePath)
+    await mkdir(path.dirname(stampedFullPath), { recursive: true })
+    await writeFile(stampedFullPath, stampedPdfBytes)
+
+    const stampedFileRecord = await createFile(user.id, {
+      id: stampedFileUuid,
+      filename: stampedFileName,
+      path: stampedRelativePath,
+      mimetype: "application/pdf",
+      isReviewed: true,
+      metadata: {
+        size: stampedPdfBytes.length,
+        lastModified: Date.now(),
+        isStamped: true,
+      },
+    })
+
+    await updateTransactionFiles(transactionId, user.id, [...keptFileIds, stampedFileRecord.id])
+
+    // Update storage
+    const storageUsed = await getDirectorySize(getUserUploadsDirectory(user))
+    await updateUser(user.id, { storageUsed })
+
+    revalidatePath(`/transactions/${transactionId}`)
+    return { success: true, data: transaction }
+  } catch (error) {
+    console.error("Failed to generate stamped PDF:", error)
+    return { success: false, error: `Failed to generate stamped PDF: ${error}` }
   }
 }
 
