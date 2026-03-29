@@ -11,7 +11,7 @@ TaxHacker is an AI-powered, self-hostable accounting app for freelancers and sma
 - **UI**: React 19, Radix UI (shadcn/ui "new-york" style), Tailwind CSS 3.4
 - **Database**: PostgreSQL 17 via Prisma 6.6 ORM
 - **Auth**: Better Auth 1.2 with email OTP
-- **AI**: LangChain 0.3 abstracting OpenAI, Google Gemini, Mistral
+- **AI**: LangChain 0.3 abstracting OpenAI, Google Gemini, Mistral, OpenRouter
 - **Payments**: Stripe
 - **Email**: Resend
 - **File Processing**: Sharp (images), pdf2pic + Ghostscript (PDFs), JSZip
@@ -117,6 +117,8 @@ Required environment variables (see `.env.example`):
 | `GOOGLE_MODEL_NAME` | Google model | `gemini-2.5-flash` |
 | `MISTRAL_API_KEY` | Mistral API key | optional |
 | `MISTRAL_MODEL_NAME` | Mistral model | `mistral-medium-latest` |
+| `OPENROUTER_API_KEY` | OpenRouter API key | optional |
+| `OPENROUTER_MODEL_NAME` | OpenRouter model | `openai/gpt-4o-mini` |
 | `RESEND_API_KEY` | Email service key | optional |
 | `STRIPE_SECRET_KEY` | Stripe payments key | optional (cloud mode) |
 

@@ -9,31 +9,16 @@ export type SettingsMap = Record<string, string>
  * Helper to extract LLM provider settings from SettingsMap.
  */
 export function getLLMSettings(settings: SettingsMap) {
-  const priorities = (settings.llm_providers || "openai,google,mistral").split(",").map(p => p.trim()).filter(Boolean)
+  const priorities = (settings.llm_providers || "openai,google,mistral,openrouter").split(",").map(p => p.trim()).filter(Boolean)
 
-  const providers = priorities.map((provider) => {
-    if (provider === "openai") {
-      return {
-        provider: provider as LLMProvider,
-        apiKey: settings.openai_api_key || "",
-        model: settings.openai_model_name || PROVIDERS[0]['defaultModelName'],
-      }
+  const providers = priorities.map((providerKey) => {
+    const providerDef = PROVIDERS.find(p => p.key === providerKey)
+    if (!providerDef) return null
+    return {
+      provider: providerKey as LLMProvider,
+      apiKey: settings[providerDef.apiKeyName] || "",
+      model: settings[providerDef.modelName] || providerDef.defaultModelName,
     }
-    if (provider === "google") {
-      return {
-        provider: provider as LLMProvider,
-        apiKey: settings.google_api_key || "",
-        model: settings.google_model_name || PROVIDERS[1]['defaultModelName'],
-      }
-    }
-    if (provider === "mistral") {
-      return {
-        provider: provider as LLMProvider,
-        apiKey: settings.mistral_api_key || "",
-        model: settings.mistral_model_name || PROVIDERS[2]['defaultModelName'],
-      }
-    }
-    return null
   }).filter((provider): provider is NonNullable<typeof provider> => provider !== null)
 
   return {

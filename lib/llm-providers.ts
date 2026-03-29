@@ -44,4 +44,19 @@ export const PROVIDERS = [
     },
     logo: "/logo/mistral.svg"
   },
+  {
+    key: "openrouter",
+    label: "OpenRouter",
+    apiKeyName: "openrouter_api_key",
+    modelName: "openrouter_model_name",
+    defaultModelName: "openai/gpt-4o-mini",
+    apiDoc: "https://openrouter.ai/keys",
+    apiDocLabel: "OpenRouter Dashboard",
+    placeholder: "sk-or-...",
+    help: {
+      url: "https://openrouter.ai/keys",
+      label: "OpenRouter Dashboard"
+    },
+    logo: "/logo/openrouter.svg"
+  },
 ]
